@@ -56,7 +56,9 @@ func TestExpectedPackages_Sorted(t *testing.T) {
 }
 
 func TestExpectedPackages_CanonicalCount(t *testing.T) {
-	const want = 8
+	// 8 inception + 1 R145.B additive (`trust` adoption of
+	// escape-service, IMP-T2-12 Phase 3 MHRA-jurisdiction).
+	const want = 9
 	if got := len(ExpectedPackages()); got != want {
 		t.Fatalf("ExpectedPackages count: got %d want %d", got, want)
 	}

@@ -16,9 +16,10 @@ import (
 )
 
 // ExpectedPackages returns the canonical list of internal/ packages
-// trial-ledger ships at inception (2026-05-27).
+// trial-ledger ships at inception (2026-05-27) plus the
+// 2026-05-29 R145.B additive `trust` adoption of escape-service.
 //
-// 8 inception packages:
+// 9 packages (8 inception + 1 R145.B addition):
 //
 //   - auditledger / fdacfr11 — domain primitives (append-only audit
 //     ledger + 21 CFR Part 11 electronic-records + signatures)
@@ -27,6 +28,9 @@ import (
 //   - manifest / honest — R150 schematised-knowledge + R143
 //     LOUD-ONCE-WARNING-FLAG
 //   - firewall — this package (R145.C pin itself)
+//   - trust — escape-service /v1/escape HTTP-client wrapper
+//     (IMP-T2-12 Phase 3 MHRA-jurisdiction adoption; sibling of
+//     counsel/internal/trust + moneycheck/internal/trust)
 func ExpectedPackages() []string {
 	return []string{
 		"auditledger",
@@ -37,6 +41,7 @@ func ExpectedPackages() []string {
 		"lore",
 		"manifest",
 		"mirrormark",
+		"trust",
 	}
 }
 
