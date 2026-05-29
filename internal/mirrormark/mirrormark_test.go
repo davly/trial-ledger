@@ -203,3 +203,39 @@ func TestSignVerify_PackageLevelParity(t *testing.T) {
 		t.Fatalf("MirrorMarker.Sign vs Sign: a=%q b=%q", a, b)
 	}
 }
+
+// TestVerifyMark_RoundTrip exercises the additive instance-method
+// VerifyMark: a mark produced by the same marker's Sign must round-trip
+// through VerifyMark (the marker re-checks against its own bound corpus +
+// key without the key leaving the marker). This is the self-check the
+// additive .evidence-bundle export path relies on.
+func TestVerifyMark_RoundTrip(t *testing.T) {
+	m := NewMirrorMarker(testCorpus, testKey)
+	payload := []byte("audit-trail envelope bytes")
+
+	mark := m.Sign(payload)
+	if ok, err := m.VerifyMark(mark, payload); !ok || err != nil {
+		t.Fatalf("VerifyMark round-trip: ok=%v err=%v", ok, err)
+	}
+
+	// VerifyMark is byte-equivalent to the package-level Verify against the
+	// marker's (corpus, key).
+	if ok, err := Verify(mark, testCorpus, payload, testKey); !ok || err != nil {
+		t.Fatalf("package-level Verify parity: ok=%v err=%v", ok, err)
+	}
+}
+
+// TestVerifyMark_DetectsTamper — VerifyMark fails closed on a tampered
+// payload, returning the typed signature-mismatch sentinel.
+func TestVerifyMark_DetectsTamper(t *testing.T) {
+	m := NewMirrorMarker(testCorpus, testKey)
+	mark := m.Sign([]byte("original"))
+
+	ok, err := m.VerifyMark(mark, []byte("tampered"))
+	if ok {
+		t.Fatal("VerifyMark must fail on tampered payload")
+	}
+	if err != ErrSignatureMismatch {
+		t.Fatalf("VerifyMark tamper: got err %v, want ErrSignatureMismatch", err)
+	}
+}

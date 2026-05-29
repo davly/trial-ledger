@@ -19,13 +19,16 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/davly/limitless-evidence-bundle/pkg/evidence"
 	"github.com/davly/trial-ledger/internal/auditledger"
 	"github.com/davly/trial-ledger/internal/honest"
 	"github.com/davly/trial-ledger/internal/mirrormark"
@@ -45,6 +48,9 @@ Commands:
   advisories          Print the 5 canonical honest-defaults advisories
                       (FDA 21 CFR Part 11 + Article 9 + e-signature
                       + investigator signoff + IRB approval).
+  evidence            Export the audit trail as a regulator-readable
+                      .evidence bundle (demo, in-memory) and cold-verify
+                      it via the limitless-evidence-bundle full chain.
   version             Print trial-ledger version.
   manifest            Print the 10 R150 schematised-knowledge entries
                       (US / UK / EU / ICH regulatory citations).
@@ -106,6 +112,11 @@ func main() {
 		}
 	case "advisories":
 		runAdvisories(os.Stdout)
+	case "evidence":
+		if err := demoEvidenceExport(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "evidence: %v\n", err)
+			os.Exit(1)
+		}
 	case "manifest":
 		runManifest(os.Stdout)
 	case "legal":
@@ -154,6 +165,92 @@ func runAppend(r io.Reader, w io.Writer) error {
 	if err := sc.Err(); err != nil {
 		return err
 	}
+	return nil
+}
+
+// demoEvidenceExport — illustrate the additive `.evidence`-bundle export
+// path over a small in-memory audit trail. trial-ledger is the THIRD
+// flagship consumer of the limitless-evidence-bundle SPEC v1 format (Folio
+// was first, bias-audit second). The export is read-only over the ledger;
+// production hosts will run it over a persistent (WAL-backed) audit trail.
+//
+// Unlike the `append` path (which constructs the marker from the
+// environment and may run on a placeholder corpus), this demo MUST use a
+// NON-placeholder corpus — a `.evidence` bundle's whole value is that it
+// cold-verifies, and ExportEvidenceSnapshot refuses a placeholder corpus
+// (ErrEvidenceNoCorpus). We seed a deterministic non-placeholder corpus +
+// key so the printed bundle re-verifies on any machine.
+func demoEvidenceExport(w io.Writer) error {
+	// Deterministic non-placeholder demo corpus + key. NOT production
+	// secrets — the loud `_NOT_FOR_PRODUCTION` token makes any leaked-to-prod
+	// use grep-loud. NewMirrorMarker leaves the placeholder flags false, so
+	// the export path treats this marker as production-backed.
+	var corpus [sha256.Size]byte
+	for i := range corpus {
+		corpus[i] = 0xC4
+	}
+	key := []byte("iik_demo_TRIAL_LEDGER_NOT_FOR_PRODUCTION")
+	now := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+
+	l := auditledger.NewLedger(mirrormark.NewMirrorMarker(corpus, key))
+
+	create := auditledger.AppendInput{
+		Action:     auditledger.ActionCreate,
+		Actor:      "investigator-alice",
+		TrialID:    "NCT06000001",
+		SubjectID:  "S-007",
+		RecordRef:  "ecrf/visit-3/page-2",
+		RecordHash: strings.Repeat("a", 64),
+		Detail:     "subject visit 3, vitals page submitted",
+	}
+	if _, err := l.Append(create); err != nil {
+		return fmt.Errorf("append create: %w", err)
+	}
+
+	sign := auditledger.AppendInput{
+		Action:    auditledger.ActionSign,
+		Actor:     "investigator-alice",
+		TrialID:   "NCT06000001",
+		SubjectID: "S-007",
+		RecordRef: "ecrf/visit-3/page-2",
+		Detail:    "investigator review signature (§11.50 approval)",
+	}
+	if _, err := l.Append(sign); err != nil {
+		return fmt.Errorf("append sign: %w", err)
+	}
+
+	export, err := l.ExportEvidenceSnapshot(auditledger.EvidenceScope{}, now)
+	if err != nil {
+		return err
+	}
+
+	// Independent cold-verify via the evidence-bundle repo's OWN full chain
+	// (KAT-1 + content-hash + Mirror-Mark) — exactly what a regulator runs.
+	res := evidence.Verify(export.Bundle, evidence.ModeFull, export.PayloadBytes, key)
+
+	fmt.Fprintln(w, "trial-ledger .evidence-bundle export demo (SPEC v1 consumer #3)")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Regulatory regime: %s\n", auditledger.EvidenceRegulatoryRegime)
+	fmt.Fprintf(w, "Trail length:   %d rows\n", l.Len())
+	fmt.Fprintf(w, "Bundle bytes:   %d\n", len(export.Bundle))
+	fmt.Fprintf(w, "Payload bytes:  %d\n", len(export.PayloadBytes))
+	fmt.Fprintf(w, "Verify class:   %s (verdict=%s exit=%d)\n", res.Class, res.Verdict, res.ExitCode)
+	fmt.Fprintf(w, "  KAT-1:        %v\n", res.KAT1Verified)
+	fmt.Fprintf(w, "  content-hash: %v\n", res.ContentHashVerified)
+	fmt.Fprintf(w, "  Mirror-Mark:  %v\n", res.MirrorMarkVerified)
+	if res.Class != "PASS" {
+		return fmt.Errorf("self full-verify did not PASS: class=%s verdict=%s failures=%v", res.Class, res.Verdict, res.Failures)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "---BEGIN .evidence BUNDLE---")
+	fmt.Fprint(w, string(export.Bundle))
+	if len(export.Bundle) > 0 && export.Bundle[len(export.Bundle)-1] != '\n' {
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w, "---END .evidence BUNDLE---")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "PASS: trial-ledger emitted a cold-verifiable .evidence bundle and the")
+	fmt.Fprintln(w, "      evidence-bundle repo's own ModeFull verifier accepts it.")
 	return nil
 }
 

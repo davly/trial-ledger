@@ -206,6 +206,20 @@ func Sign(corpusSHA [sha256.Size]byte, payload []byte, key []byte) string {
 	return MarkPrefix + base64.RawURLEncoding.EncodeToString(body)
 }
 
+// VerifyMark cold-checks a mark against THIS marker's bound (corpus,
+// key) over payload — the instance-method counterpart to Sign, added
+// so a caller that signed via marker.Sign can re-verify without the key
+// ever leaving the MirrorMarker. Returns (true, nil) on round-trip
+// success; one of the typed sentinel errors otherwise.
+//
+// Purely additive: it is a read-only convenience over the existing
+// package-level Verify and the marker's immutable (corpusSHA, key); it
+// does not touch the sign path or the wire format. Used by the additive
+// `.evidence`-bundle export path for its pre-emit Mirror-Mark self-check.
+func (m *MirrorMarker) VerifyMark(mark string, payload []byte) (bool, error) {
+	return Verify(mark, m.corpusSHA, payload, m.key)
+}
+
 // Verify cold-checks a Mirror-Mark against the caller's (corpus,
 // payload, key) triple. Returns (true, nil) on round-trip success;
 // one of the typed sentinel errors on any failure.
