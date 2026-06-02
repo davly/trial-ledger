@@ -40,12 +40,60 @@ func ExpectedPackages() []string {
 	}
 }
 
+// ExpectedAdditivePackages returns internal/ packages added AFTER
+// inception as purely-additive surface (NOT part of the canonical
+// 8-package cohort spine). They are pinned separately so the drift
+// firewall still catches anything that is neither canonical-cohort nor
+// a deliberately-allowed addition, while the "canonical cohort = 8"
+// invariant (ExpectedPackages + its count pin) stays exact.
+//
+//   - httpapi — the thin Nexus-facing transport shell over auditledger
+//     for the `audit_trail_append` capability (2026-06-02). Pure
+//     transport; adds no domain logic.
+func ExpectedAdditivePackages() []string {
+	return []string{
+		"httpapi",
+	}
+}
+
+// AllExpectedPackages is the union (canonical cohort + allowed
+// additive), sorted. The drift test compares on-disk internal/ against
+// this set: a package outside BOTH lists still trips the firewall.
+func AllExpectedPackages() []string {
+	out := append([]string{}, ExpectedPackages()...)
+	out = append(out, ExpectedAdditivePackages()...)
+	sort.Strings(out)
+	return out
+}
+
 // ExpectedBinaries returns the canonical list of cmd/<binary>/
-// directories shipping a main.go.
+// directories shipping a main.go (the inception binary).
 func ExpectedBinaries() []string {
 	return []string{
 		"trial-ledger",
 	}
+}
+
+// ExpectedAdditiveBinaries returns cmd/<binary>/ directories added
+// AFTER inception (purely-additive). Pinned separately from the
+// canonical inception binary.
+//
+//   - trial-ledger-server — the Nexus-facing HTTP producer for
+//     `audit_trail_append` (2026-06-02). Thin transport over the same
+//     auditledger engine the CLI uses.
+func ExpectedAdditiveBinaries() []string {
+	return []string{
+		"trial-ledger-server",
+	}
+}
+
+// AllExpectedBinaries is the union (canonical + allowed additive),
+// sorted. The cmd/ drift test compares on-disk against this set.
+func AllExpectedBinaries() []string {
+	out := append([]string{}, ExpectedBinaries()...)
+	out = append(out, ExpectedAdditiveBinaries()...)
+	sort.Strings(out)
+	return out
 }
 
 // ScanInternal returns the actual on-disk subdirectory names under
