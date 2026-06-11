@@ -3,7 +3,8 @@
 // cmd/ drift.
 //
 // trial-ledger ships R145.C-compliant from inception: the 8-package
-// internal/ + 1-binary cmd/ layout is pinned by ExpectedPackages /
+// (9 since the 2026-06-11 stele-anchor amendment) internal/ +
+// 1-binary cmd/ layout is pinned by ExpectedPackages /
 // ExpectedBinaries here; the matching test in firewall_test.go
 // catches additions / deletions BEFORE they reach the
 // regulator-facing FDA submission package.
@@ -16,9 +17,9 @@ import (
 )
 
 // ExpectedPackages returns the canonical list of internal/ packages
-// trial-ledger ships at inception (2026-05-27).
+// trial-ledger ships.
 //
-// 8 inception packages:
+// 8 inception packages (2026-05-27):
 //
 //   - auditledger / fdacfr11 — domain primitives (append-only audit
 //     ledger + 21 CFR Part 11 electronic-records + signatures)
@@ -27,6 +28,13 @@ import (
 //   - manifest / honest — R150 schematised-knowledge + R143
 //     LOUD-ONCE-WARNING-FLAG
 //   - firewall — this package (R145.C pin itself)
+//
+// +1 on the R145.B sibling branch claude/stele-anchor-2026-06-11:
+//
+//   - stele — the opt-in Stele verified-trust-spine anchoring client
+//     (paired confinement pin: TestR145B_SteleAnchorConfinement).
+//
+// Total = 9.
 func ExpectedPackages() []string {
 	return []string{
 		"auditledger",
@@ -37,6 +45,7 @@ func ExpectedPackages() []string {
 		"lore",
 		"manifest",
 		"mirrormark",
+		"stele",
 	}
 }
 
