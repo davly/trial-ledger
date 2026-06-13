@@ -59,9 +59,11 @@ func TestExpectedPackages_Sorted(t *testing.T) {
 }
 
 // 8 inception packages + the R145.B stele-anchor package
-// (2026-06-11; paired pin TestR145B_SteleAnchorConfinement) = 9.
+// (2026-06-11; paired pin TestR145B_SteleAnchorConfinement) +
+// the R145.C wal package (2026-06-13; WAL-backed append-log
+// persistence, quarry-db trigger-cascade port) = 10.
 func TestExpectedPackages_CanonicalCount(t *testing.T) {
-	const want = 9
+	const want = 10
 	if got := len(ExpectedPackages()); got != want {
 		t.Fatalf("ExpectedPackages count: got %d want %d", got, want)
 	}

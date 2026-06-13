@@ -34,7 +34,14 @@ import (
 //   - stele — the opt-in Stele verified-trust-spine anchoring client
 //     (paired confinement pin: TestR145B_SteleAnchorConfinement).
 //
-// Total = 9.
+// +1 on the R145.C sibling branch claude/wire-data-modeling-schema-2026-06-13:
+//
+//   - wal — WAL-backed append-log persistence layer (quarry-db
+//     trigger-cascade state machine port; Phase 2 durability primitive;
+//     stdlib-only, zero new deps; env-read discipline preserved —
+//     the WAL path is caller-supplied, no os.Getenv inside wal/).
+//
+// Total = 10.
 func ExpectedPackages() []string {
 	return []string{
 		"auditledger",
@@ -46,6 +53,7 @@ func ExpectedPackages() []string {
 		"manifest",
 		"mirrormark",
 		"stele",
+		"wal",
 	}
 }
 
