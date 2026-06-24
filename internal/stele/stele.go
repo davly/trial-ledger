@@ -104,10 +104,27 @@ type Client struct {
 }
 
 // NewClient constructs a Client for the given spine base URL.
+//
+// The http.Client REFUSES to follow redirects (CheckRedirect returns a
+// non-nil error). A 21 CFR Part 11 audit seal must POST the §11.10(e)
+// ledger digest DIRECTLY to the operator-configured spine — never to a
+// 3xx redirect target. A misconfigured, man-in-the-middled (the docs
+// use plaintext http://), or compromised spine that answers 302 would
+// otherwise re-issue the seal POST to an attacker-controlled host; if
+// that host replied 201 + entry_hash the run would read as "sealed" at
+// the genuine spine when it was actually sealed elsewhere — a direct
+// breach of the package's load-bearing HONESTY CONTRACT. A refused
+// redirect surfaces (via Seal's `stele seal: %w`) as a loud non-nil
+// error with anchored=false, exactly like any other failed seal.
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		http:    &http.Client{Timeout: 5 * time.Second},
+		http: &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return fmt.Errorf("stele: refusing redirect to %q — a 21 CFR Part 11 audit seal must POST directly to the configured spine, not a redirect target", req.URL)
+			},
+		},
 	}
 }
 

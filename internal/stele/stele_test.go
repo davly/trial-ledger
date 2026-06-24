@@ -164,6 +164,83 @@ func TestSeal_NetworkError(t *testing.T) {
 	}
 }
 
+// TestSeal_RefusesRedirect pins the transport-integrity guard: a 3xx
+// from the configured spine (misconfig / MITM on the plaintext http://
+// the docs use / compromised host) must NOT be followed. Following it
+// would re-POST the §11.10(e) ledger digest to the redirect target and,
+// on its 201+entry_hash, falsely report the run as "sealed" at the
+// genuine spine — a breach of the load-bearing HONESTY CONTRACT. The
+// guard surfaces as a loud non-nil error; the redirect target receives
+// ZERO POSTs and no receipt is ever claimed.
+func TestSeal_RefusesRedirect(t *testing.T) {
+	// The redirect target would happily "seal" the run — it answers a
+	// well-formed 201 + entry_hash. If the client followed the 3xx, Seal
+	// would return a valid-looking receipt and the run would read sealed.
+	targetPosts := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			targetPosts++
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintln(w, `{"sealed":{"seq":99,"entry_hash":"attacker-controlled-hash"}}`)
+	}))
+	defer target.Close()
+
+	// The configured spine 302-redirects the seal POST to the target.
+	spine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/v1/verdicts", http.StatusFound)
+	}))
+	defer spine.Close()
+
+	rcpt, err := NewClient(spine.URL).Seal(NewRunAnchor("append", 1, fixedDigest(), time.Now().UTC()))
+	if err == nil {
+		t.Fatalf("Seal against a 302-redirecting spine = nil error, want refusal (a redirected seal must never read as sealed)")
+	}
+	if !strings.Contains(err.Error(), "stele seal:") {
+		t.Errorf("error %q missing the stele seal wrapper", err)
+	}
+	if rcpt != (Receipt{}) {
+		t.Errorf("receipt = %+v, want zero (no receipt may be claimed from a redirected seal)", rcpt)
+	}
+	if targetPosts != 0 {
+		t.Errorf("redirect target received %d POSTs, want 0 (the ledger digest must never reach the redirect host)", targetPosts)
+	}
+}
+
+// TestAnchorRun_RefusesRedirect pins the same guard at the CLI seam:
+// AnchorRun against a redirecting spine returns anchored=false + a loud
+// error, so main.go never prints "stele anchor: sealed".
+func TestAnchorRun_RefusesRedirect(t *testing.T) {
+	targetPosts := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			targetPosts++
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintln(w, `{"sealed":{"seq":99,"entry_hash":"attacker-controlled-hash"}}`)
+	}))
+	defer target.Close()
+	spine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/v1/verdicts", http.StatusFound)
+	}))
+	defer spine.Close()
+
+	fc := &fakeChecker{entries: 1, digest: fixedDigest()}
+	rcpt, anchored, err := AnchorRun(spine.URL, "append", fc, time.Now().UTC())
+	if err == nil {
+		t.Fatalf("AnchorRun against a redirecting spine = nil error, want loud failure")
+	}
+	if anchored {
+		t.Errorf("anchored = true on a redirected seal (would print a false 'sealed' claim)")
+	}
+	if rcpt != (Receipt{}) {
+		t.Errorf("receipt = %+v, want zero", rcpt)
+	}
+	if targetPosts != 0 {
+		t.Errorf("redirect target received %d POSTs, want 0", targetPosts)
+	}
+}
+
 // TestAnchorRun_Disabled pins the off-by-default contract: empty (or
 // whitespace) URL means NO self-check, NO HTTP, no receipt, no error —
 // behavior identical to a non-anchoring run.
