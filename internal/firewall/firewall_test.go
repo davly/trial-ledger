@@ -31,7 +31,10 @@ func TestScanInternal_MatchesExpected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanInternal: %v", err)
 	}
-	want := ExpectedPackages()
+	// Compare against the canonical-cohort ∪ allowed-additive union: a
+	// package outside BOTH lists still trips the firewall (drift caught),
+	// while deliberately-added transport surface (httpapi) is allowed.
+	want := AllExpectedPackages()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("internal/ packages drift:\ngot:  %v\nwant: %v", got, want)
 	}
@@ -43,9 +46,36 @@ func TestScanCmd_MatchesExpected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanCmd: %v", err)
 	}
-	want := ExpectedBinaries()
+	want := AllExpectedBinaries()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("cmd/ binaries drift:\ngot:  %v\nwant: %v", got, want)
+	}
+}
+
+// TestExpectedAdditivePackages_AreNotCanonical guards the separation
+// invariant: the additive set must never overlap the canonical
+// 8-package cohort spine (an additive package masquerading as canonical
+// would corrupt the count pin).
+func TestExpectedAdditivePackages_AreNotCanonical(t *testing.T) {
+	canonical := map[string]bool{}
+	for _, p := range ExpectedPackages() {
+		canonical[p] = true
+	}
+	for _, p := range ExpectedAdditivePackages() {
+		if canonical[p] {
+			t.Errorf("additive package %q also appears in the canonical cohort — must be disjoint", p)
+		}
+	}
+}
+
+// TestAdditiveSurface_Pinned pins the deliberately-added Nexus
+// transport surface so a future removal/rename is itself caught.
+func TestAdditiveSurface_Pinned(t *testing.T) {
+	if !reflect.DeepEqual(ExpectedAdditivePackages(), []string{"httpapi"}) {
+		t.Errorf("additive internal/ packages drift: %v", ExpectedAdditivePackages())
+	}
+	if !reflect.DeepEqual(ExpectedAdditiveBinaries(), []string{"trial-ledger-server"}) {
+		t.Errorf("additive cmd/ binaries drift: %v", ExpectedAdditiveBinaries())
 	}
 }
 

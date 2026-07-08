@@ -130,11 +130,27 @@ type Record struct {
 	RecordHash string      `json:"recordHash,omitempty"`
 	Detail     string      `json:"detail,omitempty"`
 
+	// OriginatorID is the provenance field — the identity of the
+	// consumer/end-user that originated this audit row, as resolved by
+	// the Nexus capability-hub and forwarded via the X-User-Id header.
+	//
+	// ADDITIVE + WIRE-SAFE (R145-strict): declared at the end of the
+	// data fields with `omitempty`, so a Record produced WITHOUT an
+	// originator (the CLI path, every pre-existing caller) marshals to
+	// byte-identical canonical bytes — the existing KAT pins and
+	// cold-verify recipe are unchanged. When the Nexus producer stamps
+	// it, the originating consumer becomes part of the Mirror-Marked,
+	// cold-verifiable receipt: a regulator re-deriving the row sees who
+	// originated it, not just what action occurred.
+	OriginatorID string `json:"originatorId,omitempty"`
+
 	// MirrorMark is the L43 v1 cold-verifiable receipt over the
 	// canonical bytes of this row with MirrorMark itself cleared.
 	// Format: "lore@v1:" + base64url(8B corpus prefix || 32B HMAC).
 	// LOAD-BEARING (R175): every Record in the production ledger
-	// HAS a non-empty MirrorMark.
+	// HAS a non-empty MirrorMark. MirrorMark stays the LAST field so
+	// CanonicalBytes (which clears it) covers every data field above
+	// — including OriginatorID.
 	MirrorMark string `json:"mirrorMark"`
 }
 
@@ -205,6 +221,13 @@ type AppendInput struct {
 	RecordRef  string
 	RecordHash string
 	Detail     string
+
+	// OriginatorID is the optional provenance attribution (the Nexus-
+	// forwarded originating consumer/user). Empty on the CLI path;
+	// stamped by the httpapi producer from the X-User-Id header so the
+	// resulting Record's Mirror-Mark covers it. Additive — see
+	// Record.OriginatorID.
+	OriginatorID string
 }
 
 // Append appends one audit-trail row. The row is canonicalised (with
@@ -231,15 +254,16 @@ func (l *Ledger) Append(in AppendInput) (Record, error) {
 	defer l.mu.Unlock()
 
 	r := Record{
-		ID:         atomic.AddUint64(&l.nextID, 1),
-		At:         time.Now().UTC(),
-		Action:     in.Action,
-		Actor:      in.Actor,
-		TrialID:    in.TrialID,
-		SubjectID:  in.SubjectID,
-		RecordRef:  in.RecordRef,
-		RecordHash: in.RecordHash,
-		Detail:     in.Detail,
+		ID:           atomic.AddUint64(&l.nextID, 1),
+		At:           time.Now().UTC(),
+		Action:       in.Action,
+		Actor:        in.Actor,
+		TrialID:      in.TrialID,
+		SubjectID:    in.SubjectID,
+		RecordRef:    in.RecordRef,
+		RecordHash:   in.RecordHash,
+		Detail:       in.Detail,
+		OriginatorID: in.OriginatorID,
 	}
 
 	// R175 wire-load-bearing stamp.
