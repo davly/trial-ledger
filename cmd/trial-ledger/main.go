@@ -32,6 +32,7 @@ import (
 	"github.com/davly/trial-ledger/internal/auditledger"
 	"github.com/davly/trial-ledger/internal/honest"
 	"github.com/davly/trial-ledger/internal/mirrormark"
+	"github.com/davly/trial-ledger/internal/stele"
 )
 
 const version = "0.1.0-phase-1-mvp"
@@ -70,6 +71,20 @@ Environment:
   TRIAL_LEDGER_MIRRORMARK_KEY         HMAC key (iik_... format).
                                        Optional — loud-once WARN if
                                        absent.
+  TRIAL_LEDGER_STELE_URL              Stele verified-trust-spine base
+                                       URL (e.g. http://localhost:8097).
+                                       Optional — unset/empty disables
+                                       anchoring entirely (no network,
+                                       no new output). When set, the
+                                       'append' run's audit ledger must
+                                       pass its own SelfCheck and is
+                                       then sealed at the spine; a
+                                       requested anchor that fails
+                                       (self-check, network, non-201)
+                                       prints to stderr and exits
+                                       non-zero. The anchor complements
+                                       — it does NOT replace — the
+                                       Mirror-Mark cold-verify.
 
 AppendInput JSON shape (one per line on stdin for 'append'):
   {
@@ -165,6 +180,8 @@ func runAppend(r io.Reader, w io.Writer) error {
 	if err := sc.Err(); err != nil {
 		return err
 	}
+
+	maybeAnchorToStele(ledger, "append")
 	return nil
 }
 
@@ -252,6 +269,37 @@ func demoEvidenceExport(w io.Writer) error {
 	fmt.Fprintln(w, "PASS: trial-ledger emitted a cold-verifiable .evidence bundle and the")
 	fmt.Fprintln(w, "      evidence-bundle repo's own ModeFull verifier accepts it.")
 	return nil
+}
+
+// maybeAnchorToStele anchors the command's audit ledger into the
+// Stele spine when TRIAL_LEDGER_STELE_URL is set. Unset/empty =
+// disabled: no self-check, no HTTP, no output — behavior identical
+// to a non-anchoring run. This is the ONLY os.Getenv site outside
+// the two mirrormark boot reads (R145.B stele-anchor confinement pin
+// in internal/firewall/).
+//
+// Honesty rules (load-bearing):
+//   - the sealed line prints ONLY after the spine returned
+//     201 + entry_hash (stele.AnchorRun enforces this);
+//   - a requested anchor that fails — ledger self-check, network,
+//     non-201 — prints to stderr and exits non-zero, so a missing
+//     anchor can never look like success;
+//   - the receipt prints to STDERR, keeping stdout a pure
+//     newline-delimited-JSON Record stream (the same
+//     machine-format-preservation adaptation as ofgemwatch's
+//     entsoe-emit XML-comment receipt; trial-ledger already routes
+//     all non-Record output — the honest-defaults advisories — to
+//     stderr).
+func maybeAnchorToStele(ledger *auditledger.Ledger, command string) {
+	rcpt, anchored, err := stele.AnchorRun(os.Getenv(stele.EnvURL), command, ledger, time.Now().UTC())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stele anchor FAILED (%s set, anchor requested but NOT sealed): %v\n", stele.EnvURL, err)
+		os.Exit(1)
+	}
+	if !anchored {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "stele anchor: sealed seq=%d entry_hash=%s\n", rcpt.Seq, rcpt.EntryHash)
 }
 
 func runAdvisories(w io.Writer) {

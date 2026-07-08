@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/davly/trial-ledger/internal/mirrormark"
 )
@@ -290,6 +291,183 @@ func TestRecord_CanonicalBytesClearsMirrorMark(t *testing.T) {
 	}
 	if strings.Contains(string(cb), "DELIBERATELY_BOGUS") {
 		t.Fatalf("CanonicalBytes must clear MirrorMark: %s", cb)
+	}
+}
+
+// fixedRecord builds a fully-populated Record with a deterministic
+// timestamp and a correctly-derived Mirror-Mark from the shared test
+// (corpus, key). Used by the SelfCheck determinism tests: the
+// production Append path stamps time.Now().UTC() (§11.10(e)
+// computer-generated timestamp, deliberately not injectable), so
+// cross-ledger digest determinism can only be exercised with
+// directly-constructed rows.
+func fixedRecord(id uint64, ref string, at time.Time) Record {
+	r := Record{
+		ID:         id,
+		At:         at.UTC(),
+		Action:     ActionCreate,
+		Actor:      "investigator-alice",
+		TrialID:    "NCT06000001",
+		SubjectID:  "S-007",
+		RecordRef:  ref,
+		RecordHash: strings.Repeat("a", 64),
+		Detail:     "deterministic fixture row",
+	}
+	r.MirrorMark = newTestMarker().Sign(r.CanonicalBytes())
+	return r
+}
+
+// buildFixedLedger assembles a ledger whose rows were constructed
+// outside Append (package-internal test seam — the same direct
+// l.rows access the tamper tests use).
+func buildFixedLedger(rows ...Record) *Ledger {
+	l := NewLedger(newTestMarker())
+	l.rows = append(l.rows, rows...)
+	return l
+}
+
+// TestSelfCheck_GreenAndIdempotent pins the SelfCheck contract used
+// by Stele spine anchoring: a healthy ledger built through the real
+// Append path self-checks green, and repeated SelfCheck calls on the
+// same ledger state return the identical digest (the canonical run
+// serialization is a pure function of ledger content).
+func TestSelfCheck_GreenAndIdempotent(t *testing.T) {
+	l := NewLedger(newTestMarker())
+	for i := 0; i < 2; i++ {
+		in := validInput()
+		in.Action = AllAuditActions()[i]
+		if _, err := l.Append(in); err != nil {
+			t.Fatalf("Append[%d]: %v", i, err)
+		}
+	}
+
+	n1, d1, err := l.SelfCheck()
+	if err != nil {
+		t.Fatalf("SelfCheck on healthy ledger: %v", err)
+	}
+	if n1 != 2 {
+		t.Errorf("SelfCheck count: got %d, want 2", n1)
+	}
+	var zero [sha256.Size]byte
+	if d1 == zero {
+		t.Errorf("SelfCheck digest is zero for a non-empty ledger")
+	}
+
+	n2, d2, err := l.SelfCheck()
+	if err != nil {
+		t.Fatalf("SelfCheck second pass: %v", err)
+	}
+	if n2 != n1 || d1 != d2 {
+		t.Errorf("SelfCheck not idempotent: (%d, %x) vs (%d, %x)", n1, d1, n2, d2)
+	}
+}
+
+// TestSelfCheck_DeterministicAndOrderSensitive pins the canonical run
+// serialization across independent ledgers: identical rows in
+// identical order produce an identical digest, and append ORDER is
+// load-bearing — swapping rows MUST change the digest (the digest is
+// the Stele anchor's subject_hash binding).
+func TestSelfCheck_DeterministicAndOrderSensitive(t *testing.T) {
+	at := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	rowA := fixedRecord(1, "ecrf/visit-1/page-1", at)
+	rowB := fixedRecord(2, "ecrf/visit-2/page-1", at.Add(time.Minute))
+
+	_, d1, err := buildFixedLedger(rowA, rowB).SelfCheck()
+	if err != nil {
+		t.Fatalf("SelfCheck on first ledger: %v", err)
+	}
+	_, d2, err := buildFixedLedger(rowA, rowB).SelfCheck()
+	if err != nil {
+		t.Fatalf("SelfCheck on second ledger: %v", err)
+	}
+	if d1 != d2 {
+		t.Errorf("SelfCheck digest non-deterministic: %x vs %x", d1, d2)
+	}
+
+	_, d3, err := buildFixedLedger(rowB, rowA).SelfCheck()
+	if err != nil {
+		t.Fatalf("SelfCheck on swapped ledger: %v", err)
+	}
+	if d3 == d1 {
+		t.Errorf("SelfCheck digest insensitive to row order: %x", d3)
+	}
+}
+
+// TestSelfCheck_DetectsTamper pins the integrity half of SelfCheck:
+// post-Append mutation of row content or carried mark MUST fail the
+// self-check (this is the gate that keeps a tampered §11.10(e) audit
+// trail from being anchored LIT into the Stele spine).
+func TestSelfCheck_DetectsTamper(t *testing.T) {
+	// Tampered row content (direct slice mutation — the documented
+	// antipattern the self-check exists to surface).
+	l := NewLedger(newTestMarker())
+	if _, err := l.Append(validInput()); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	l.rows[0].Detail = "tampered detail"
+	if _, _, err := l.SelfCheck(); err == nil {
+		t.Errorf("SelfCheck accepted a tampered Detail, want failure")
+	}
+
+	// Tampered mark (still cohort-prefixed so the prefix gate alone
+	// cannot catch it).
+	l2 := NewLedger(newTestMarker())
+	stamped, err := l2.Append(validInput())
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	l2.rows[0].MirrorMark = stamped.MirrorMark[:len(stamped.MirrorMark)-2] + "xx"
+	if _, _, err := l2.SelfCheck(); err == nil {
+		t.Errorf("SelfCheck accepted a tampered mark, want failure")
+	}
+
+	// Mark missing the cohort prefix entirely.
+	l3 := NewLedger(newTestMarker())
+	if _, err := l3.Append(validInput()); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	l3.rows[0].MirrorMark = "not-a-mark"
+	if _, _, err := l3.SelfCheck(); err == nil {
+		t.Errorf("SelfCheck accepted a prefix-less mark, want failure")
+	}
+}
+
+// TestSelfCheck_DetectsStructuralMutation pins the cheap structural
+// re-validation: a row whose closed-enum Action or required
+// §11.10(e) fields were mutated post-Append fails the self-check.
+func TestSelfCheck_DetectsStructuralMutation(t *testing.T) {
+	l := NewLedger(newTestMarker())
+	if _, err := l.Append(validInput()); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	l.rows[0].Action = AuditAction("garbage.action")
+	if _, _, err := l.SelfCheck(); err == nil {
+		t.Errorf("SelfCheck accepted an out-of-enum Action, want failure")
+	}
+
+	l2 := NewLedger(newTestMarker())
+	if _, err := l2.Append(validInput()); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	l2.rows[0].Actor = ""
+	if _, _, err := l2.SelfCheck(); err == nil {
+		t.Errorf("SelfCheck accepted an empty Actor, want failure")
+	}
+}
+
+// TestSelfCheck_EmptyLedger pins the empty-ledger shape: zero rows is
+// not an integrity failure (count 0, the sha256 of the empty stream,
+// nil error).
+func TestSelfCheck_EmptyLedger(t *testing.T) {
+	n, d, err := NewLedger(newTestMarker()).SelfCheck()
+	if err != nil {
+		t.Fatalf("SelfCheck on empty ledger: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("SelfCheck count on empty ledger: got %d, want 0", n)
+	}
+	if want := sha256.Sum256(nil); d != want {
+		t.Errorf("SelfCheck digest on empty ledger: got %x, want sha256 of empty stream %x", d, want)
 	}
 }
 

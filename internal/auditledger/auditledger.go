@@ -37,10 +37,13 @@
 package auditledger
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,11 +130,27 @@ type Record struct {
 	RecordHash string      `json:"recordHash,omitempty"`
 	Detail     string      `json:"detail,omitempty"`
 
+	// OriginatorID is the provenance field — the identity of the
+	// consumer/end-user that originated this audit row, as resolved by
+	// the Nexus capability-hub and forwarded via the X-User-Id header.
+	//
+	// ADDITIVE + WIRE-SAFE (R145-strict): declared at the end of the
+	// data fields with `omitempty`, so a Record produced WITHOUT an
+	// originator (the CLI path, every pre-existing caller) marshals to
+	// byte-identical canonical bytes — the existing KAT pins and
+	// cold-verify recipe are unchanged. When the Nexus producer stamps
+	// it, the originating consumer becomes part of the Mirror-Marked,
+	// cold-verifiable receipt: a regulator re-deriving the row sees who
+	// originated it, not just what action occurred.
+	OriginatorID string `json:"originatorId,omitempty"`
+
 	// MirrorMark is the L43 v1 cold-verifiable receipt over the
 	// canonical bytes of this row with MirrorMark itself cleared.
 	// Format: "lore@v1:" + base64url(8B corpus prefix || 32B HMAC).
 	// LOAD-BEARING (R175): every Record in the production ledger
-	// HAS a non-empty MirrorMark.
+	// HAS a non-empty MirrorMark. MirrorMark stays the LAST field so
+	// CanonicalBytes (which clears it) covers every data field above
+	// — including OriginatorID.
 	MirrorMark string `json:"mirrorMark"`
 }
 
@@ -202,6 +221,13 @@ type AppendInput struct {
 	RecordRef  string
 	RecordHash string
 	Detail     string
+
+	// OriginatorID is the optional provenance attribution (the Nexus-
+	// forwarded originating consumer/user). Empty on the CLI path;
+	// stamped by the httpapi producer from the X-User-Id header so the
+	// resulting Record's Mirror-Mark covers it. Additive — see
+	// Record.OriginatorID.
+	OriginatorID string
 }
 
 // Append appends one audit-trail row. The row is canonicalised (with
@@ -228,15 +254,16 @@ func (l *Ledger) Append(in AppendInput) (Record, error) {
 	defer l.mu.Unlock()
 
 	r := Record{
-		ID:         atomic.AddUint64(&l.nextID, 1),
-		At:         time.Now().UTC(),
-		Action:     in.Action,
-		Actor:      in.Actor,
-		TrialID:    in.TrialID,
-		SubjectID:  in.SubjectID,
-		RecordRef:  in.RecordRef,
-		RecordHash: in.RecordHash,
-		Detail:     in.Detail,
+		ID:           atomic.AddUint64(&l.nextID, 1),
+		At:           time.Now().UTC(),
+		Action:       in.Action,
+		Actor:        in.Actor,
+		TrialID:      in.TrialID,
+		SubjectID:    in.SubjectID,
+		RecordRef:    in.RecordRef,
+		RecordHash:   in.RecordHash,
+		Detail:       in.Detail,
+		OriginatorID: in.OriginatorID,
 	}
 
 	// R175 wire-load-bearing stamp.
@@ -314,6 +341,77 @@ func (l *Ledger) VerifyAll(corpusSHA [32]byte, key []byte) (valid int, total int
 		valid++
 	}
 	return valid, total, firstErr
+}
+
+// SelfCheck re-derives every row's Mirror-Mark from its canonical
+// bytes via the ledger's OWN marker, and re-runs the cheap structural
+// checks the append path enforced (closed-enum R115 AuditAction +
+// required §11.10(e) fields: Actor, TrialID, RecordRef). On success
+// it returns the row count plus the ledger digest; on the first
+// failure it returns a non-nil error and a zero digest (callers MUST
+// NOT anchor/attest a ledger whose self-check failed — this is the
+// gate internal/stele.AnchorRun enforces before sealing a LIT
+// run-anchor into the Stele spine).
+//
+// LEDGER DIGEST — canonical run serialization (documented contract):
+// sha256 over, for each Record in append order,
+//
+//	json.Marshal(Record) || '\n'
+//
+// Go's encoding/json marshals struct fields in declaration order
+// (id, at, action, actor, trialId, subjectId, recordRef, recordHash,
+// detail, mirrorMark — the same declaration-order property
+// Record.CanonicalBytes already relies on) and time.Time marshals as
+// RFC 3339, so the byte stream is deterministic: identical rows in
+// identical order produce an identical digest, and any change to row
+// content, mark, or ORDER changes it. The ledger is not hash-chained
+// (Phase-1 in-memory ring), so this digest is the canonical binding
+// for a Stele spine anchor's subject_hash.
+//
+// HONESTY: this is a SELF-check — the same marker that stamped the
+// rows re-derives the marks. It surfaces post-Append tampering of
+// in-memory rows, but it is NOT an independent oracle and does NOT
+// prove the marker key is production-grade (a placeholder-mode
+// marker self-checks green; the R143 loud-once warning covers that).
+// Downstream consumers describing this check MUST label it
+// self-check, not gauntlet. The Stele anchor COMPLEMENTS — it does
+// not replace — the Mirror-Mark cold-verify an FDA reviewer performs
+// offline against (corpusSHA, key).
+func (l *Ledger) SelfCheck() (int, [sha256.Size]byte, error) {
+	var digest [sha256.Size]byte
+
+	l.mu.RLock()
+	snap := make([]Record, len(l.rows))
+	copy(snap, l.rows)
+	l.mu.RUnlock()
+
+	h := sha256.New()
+	for i, r := range snap {
+		if !isValidAction(r.Action) {
+			return 0, digest, fmt.Errorf("auditledger: self-check failed: row %d Action %q not in closed-enum R115 AuditAction set", i, r.Action)
+		}
+		if r.Actor == "" || r.TrialID == "" || r.RecordRef == "" {
+			return 0, digest, fmt.Errorf("auditledger: self-check failed: row %d missing required §11.10(e) field (Actor/TrialID/RecordRef)", i)
+		}
+		if !strings.HasPrefix(r.MirrorMark, mirrormark.MarkPrefix) {
+			return 0, digest, fmt.Errorf("auditledger: self-check failed: row %d mark missing cohort-canonical prefix %q", i, mirrormark.MarkPrefix)
+		}
+		cb := r.CanonicalBytes()
+		if cb == nil {
+			return 0, digest, fmt.Errorf("auditledger: self-check failed: row %d canonical bytes derivation failed", i)
+		}
+		if l.marker.Sign(cb) != r.MirrorMark {
+			return 0, digest, fmt.Errorf("auditledger: self-check failed: row %d mark does not re-derive from canonical bytes (row or mark tampered)", i)
+		}
+		line, err := json.Marshal(r)
+		if err != nil {
+			return 0, digest, fmt.Errorf("auditledger: self-check failed: row %d serialization: %w", i, err)
+		}
+		h.Write(line)
+		h.Write([]byte{'\n'})
+	}
+	copy(digest[:], h.Sum(nil))
+	return len(snap), digest, nil
 }
 
 func validateAppendInput(in AppendInput) error {

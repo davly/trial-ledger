@@ -8,7 +8,7 @@
 
 ## Status
 
-**Status (2026-05-27 inception)**: **Phase-1 MVP** — canonical cohort 8-package layout (lore + mirrormark + manifest + honest + firewall + legal + auditledger + fdacfr11) shipped from first commit. **Mirror-Mark wire-load-bearing from inception** — `auditledger.NewLedger(nil)` panics with `ErrNilMarker`; there is no code path through `Append()` that produces an unstamped row. **R174 5-of-5 strict** — all 5 canonical cohort R-rules (R143 honest + R145.C firewall + R150 manifest + R151 lore + R166 legal-citation cohort) wired at scaffold birth. **R175 R-MIRROR-MARK-LOAD-BEARING-IN-PRODUCTION 6th cohort saturator**. **R154 Article-9 cohort 4th saturator** (joins haven + triage-hospital + clinician — clinical-trial records are GDPR Article 9(1) special-category personal data concerning health). Phase-1 in-memory append-only ring; the canonical-shape persistence layer (WAL-SQLite or WAL-Postgres) is Phase-2.
+**Status (2026-05-27 inception; 2026-06-11 stele-anchor amendment)**: **Phase-1 MVP** — canonical cohort 8-package layout (lore + mirrormark + manifest + honest + firewall + legal + auditledger + fdacfr11) shipped from first commit; the `claude/stele-anchor-2026-06-11` branch adds the 9th package `internal/stele` — opt-in (`TRIAL_LEDGER_STELE_URL`) anchoring of each `append` run's self-checked audit ledger into the Stele verified-trust spine (the anchor complements — it does NOT replace — the Mirror-Mark cold-verifiability; see SECURITY.md §Stele spine anchoring). **Mirror-Mark wire-load-bearing from inception** — `auditledger.NewLedger(nil)` panics with `ErrNilMarker`; there is no code path through `Append()` that produces an unstamped row. **R174 5-of-5 strict** — all 5 canonical cohort R-rules (R143 honest + R145.C firewall + R150 manifest + R151 lore + R166 legal-citation cohort) wired at scaffold birth. **R175 R-MIRROR-MARK-LOAD-BEARING-IN-PRODUCTION 6th cohort saturator**. **R154 Article-9 cohort 4th saturator** (joins haven + triage-hospital + clinician — clinical-trial records are GDPR Article 9(1) special-category personal data concerning health). Phase-1 in-memory append-only ring; the canonical-shape persistence layer (WAL-SQLite or WAL-Postgres) is Phase-2.
 
 | Field | Value |
 |---|---|
@@ -17,9 +17,9 @@
 | **Priority** | **BR6 (overnight-3) rank #3 — $900k Y1** (per overnight-3 business-rank cohort) |
 | **Primary language (shipped)** | **Go 1.22** (pure-stdlib; zero `go.mod` requires) |
 | **Planned sibling** | **Rust 1.78+** (`trial-ledger-rust` per R169 paired-cross-substrate cohort siblings) |
-| **Active branch** | `main` |
+| **Active branch** | `claude/stele-anchor-2026-06-11` (off `main`; opt-in Stele spine anchoring — third flagship consumer wire after ofgemwatch + bias-audit) |
 | **Remote** | `github.com/davly/trial-ledger.git` (Apache 2.0) |
-| **Internal packages** | **8** (auditledger / fdacfr11 / firewall / honest / legal / lore / manifest / mirrormark) |
+| **Internal packages** | **9** (auditledger / fdacfr11 / firewall / honest / legal / lore / manifest / mirrormark + stele on the 2026-06-11 anchor branch) |
 | **Binaries** | **1** (cmd/trial-ledger) |
 | **Honest-defaults advisories** | **5** (3 Error + 2 Warn per R143.A severity ladder) |
 | **R150 manifest entries** | **10** (6 US FDA + 1 UK GDPR + 2 EU + 1 ICH) |
