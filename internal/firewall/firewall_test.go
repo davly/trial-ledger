@@ -58,10 +58,12 @@ func TestExpectedPackages_Sorted(t *testing.T) {
 	}
 }
 
-// 8 inception packages + the R145.B stele-anchor package
-// (2026-06-11; paired pin TestR145B_SteleAnchorConfinement) = 9.
+// 8 inception packages + the R145.B stele-anchor package (2026-06-11;
+// paired pin TestR145B_SteleAnchorConfinement) + the R145.B `trust`
+// adoption of escape-service (2026-05-29; IMP-T2-12 Phase 3
+// MHRA-jurisdiction) = 10.
 func TestExpectedPackages_CanonicalCount(t *testing.T) {
-	const want = 9
+	const want = 10
 	if got := len(ExpectedPackages()); got != want {
 		t.Fatalf("ExpectedPackages count: got %d want %d", got, want)
 	}
@@ -165,12 +167,13 @@ func fileContains(t *testing.T, path string, patterns ...string) (bool, string) 
 	return false, ""
 }
 
-// inSteleDir reports whether path lives under internal/stele/ — the
-// ONE package permitted to hold an HTTP client after the R145.B
-// stele-anchor amendment (2026-06-11).
+// inSteleDir reports whether path lives under internal/stele/ or
+// internal/trust/ — the packages permitted to hold an HTTP client
+// after the R145.B stele-anchor amendment (2026-06-11) and the
+// R145.B `trust` escape-service adoption (2026-05-29) respectively.
 func inSteleDir(path string) bool {
 	sep := string(filepath.Separator)
-	return strings.Contains(path, sep+"stele"+sep)
+	return strings.Contains(path, sep+"stele"+sep) || strings.Contains(path, sep+"trust"+sep)
 }
 
 // TestR145B_SteleAnchorConfinement is the paired regression pin for
@@ -180,9 +183,9 @@ func inSteleDir(path string) bool {
 // narrowed shape executable). It pins the NEW invariant shape so any
 // further drift breaks a test:
 //
-//  1. every production net/http usage lives under internal/stele/
-//     (client-only — listener primitives stay banned EVERYWHERE,
-//     including internal/stele/);
+//  1. every production net/http usage lives under internal/stele/ or
+//     internal/trust/ (client-only — listener primitives stay banned
+//     EVERYWHERE, including those two packages);
 //  2. the stele client carries the 5-second timeout;
 //  3. env reads stay confined: os.Getenv appears in exactly two
 //     production files — internal/mirrormark/mirrormark.go (the two
@@ -213,14 +216,14 @@ func TestR145B_SteleAnchorConfinement(t *testing.T) {
 		}
 	}
 
-	// (1) net/http confined to internal/stele/ — and present there
-	// (the wire is load-bearing, not decorative).
+	// (1) net/http confined to internal/stele/ + internal/trust/ —
+	// and present there (the wire is load-bearing, not decorative).
 	if len(netHTTPFiles) == 0 {
 		t.Errorf("R145.B pin violation: no production file imports net/http — the stele spine wire is gone; re-pin the firewall if this is deliberate")
 	}
 	for _, path := range netHTTPFiles {
 		if !inSteleDir(path) {
-			t.Errorf("R145.B pin violation: %s imports net/http outside internal/stele/", path)
+			t.Errorf("R145.B pin violation: %s imports net/http outside internal/stele/ or internal/trust/", path)
 		}
 	}
 

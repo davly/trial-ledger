@@ -3,11 +3,11 @@
 // cmd/ drift.
 //
 // trial-ledger ships R145.C-compliant from inception: the 8-package
-// (9 since the 2026-06-11 stele-anchor amendment) internal/ +
-// 1-binary cmd/ layout is pinned by ExpectedPackages /
-// ExpectedBinaries here; the matching test in firewall_test.go
-// catches additions / deletions BEFORE they reach the
-// regulator-facing FDA submission package.
+// (10 since the 2026-06-11 stele-anchor + 2026-05-29 trust-adoption
+// amendments) internal/ + 1-binary cmd/ layout is pinned by
+// ExpectedPackages / ExpectedBinaries here; the matching test in
+// firewall_test.go catches additions / deletions BEFORE they reach
+// the regulator-facing FDA submission package.
 package firewall
 
 import (
@@ -17,9 +17,10 @@ import (
 )
 
 // ExpectedPackages returns the canonical list of internal/ packages
-// trial-ledger ships.
+// trial-ledger ships at inception (2026-05-27) plus additive
+// amendments layered on afterward.
 //
-// 8 inception packages (2026-05-27):
+// 10 packages (8 inception + 2 additions):
 //
 //   - auditledger / fdacfr11 — domain primitives (append-only audit
 //     ledger + 21 CFR Part 11 electronic-records + signatures)
@@ -34,7 +35,14 @@ import (
 //   - stele — the opt-in Stele verified-trust-spine anchoring client
 //     (paired confinement pin: TestR145B_SteleAnchorConfinement).
 //
-// Total = 9.
+// +1 on the 2026-05-29 R145.B additive `trust` adoption of
+// escape-service:
+//
+//   - trust — escape-service /v1/escape HTTP-client wrapper
+//     (IMP-T2-12 Phase 3 MHRA-jurisdiction adoption; sibling of
+//     counsel/internal/trust + moneycheck/internal/trust)
+//
+// Total = 10.
 func ExpectedPackages() []string {
 	return []string{
 		"auditledger",
@@ -46,6 +54,7 @@ func ExpectedPackages() []string {
 		"manifest",
 		"mirrormark",
 		"stele",
+		"trust",
 	}
 }
 
