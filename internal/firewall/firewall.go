@@ -3,11 +3,11 @@
 // cmd/ drift.
 //
 // trial-ledger ships R145.C-compliant from inception: the 8-package
-// (10 since the 2026-06-11 stele-anchor + 2026-05-29 trust-adoption
-// amendments) internal/ + 1-binary cmd/ layout is pinned by
-// ExpectedPackages / ExpectedBinaries here; the matching test in
-// firewall_test.go catches additions / deletions BEFORE they reach
-// the regulator-facing FDA submission package.
+// (11 since the 2026-06-11 stele-anchor + 2026-05-29 trust-adoption +
+// 2026-06-13 wal-persistence amendments) internal/ + 1-binary cmd/
+// layout is pinned by ExpectedPackages / ExpectedBinaries here; the
+// matching test in firewall_test.go catches additions / deletions
+// BEFORE they reach the regulator-facing FDA submission package.
 package firewall
 
 import (
@@ -20,7 +20,7 @@ import (
 // trial-ledger ships at inception (2026-05-27) plus additive
 // amendments layered on afterward.
 //
-// 10 packages (8 inception + 2 additions):
+// 11 packages (8 inception + 3 additions):
 //
 //   - auditledger / fdacfr11 — domain primitives (append-only audit
 //     ledger + 21 CFR Part 11 electronic-records + signatures)
@@ -42,7 +42,14 @@ import (
 //     (IMP-T2-12 Phase 3 MHRA-jurisdiction adoption; sibling of
 //     counsel/internal/trust + moneycheck/internal/trust)
 //
-// Total = 10.
+// +1 on the R145.C sibling branch claude/wire-data-modeling-schema-2026-06-13:
+//
+//   - wal — WAL-backed append-log persistence layer (quarry-db
+//     trigger-cascade state machine port; Phase 2 durability primitive;
+//     stdlib-only, zero new deps; env-read discipline preserved —
+//     the WAL path is caller-supplied, no os.Getenv inside wal/).
+//
+// Total = 11.
 func ExpectedPackages() []string {
 	return []string{
 		"auditledger",
@@ -55,6 +62,7 @@ func ExpectedPackages() []string {
 		"mirrormark",
 		"stele",
 		"trust",
+		"wal",
 	}
 }
 
