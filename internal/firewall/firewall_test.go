@@ -197,13 +197,19 @@ func fileContains(t *testing.T, path string, patterns ...string) (bool, string) 
 	return false, ""
 }
 
-// inSteleDir reports whether path lives under internal/stele/ or
-// internal/trust/ — the packages permitted to hold an HTTP client
-// after the R145.B stele-anchor amendment (2026-06-11) and the
-// R145.B `trust` escape-service adoption (2026-05-29) respectively.
+// inSteleDir reports whether path lives under internal/stele/,
+// internal/trust/, internal/httpapi/, or cmd/trial-ledger-server/ —
+// the packages permitted to hold an HTTP client (server or client)
+// after the R145.B stele-anchor amendment (2026-06-11), the R145.B
+// `trust` escape-service adoption (2026-05-29), and the
+// audit_trail_append Nexus HTTP producer wire (2026-06-02)
+// respectively.
 func inSteleDir(path string) bool {
 	sep := string(filepath.Separator)
-	return strings.Contains(path, sep+"stele"+sep) || strings.Contains(path, sep+"trust"+sep)
+	return strings.Contains(path, sep+"stele"+sep) ||
+		strings.Contains(path, sep+"trust"+sep) ||
+		strings.Contains(path, sep+"httpapi"+sep) ||
+		strings.Contains(path, sep+"trial-ledger-server"+sep)
 }
 
 // TestR145B_SteleAnchorConfinement is the paired regression pin for
@@ -213,16 +219,21 @@ func inSteleDir(path string) bool {
 // narrowed shape executable). It pins the NEW invariant shape so any
 // further drift breaks a test:
 //
-//  1. every production net/http usage lives under internal/stele/ or
-//     internal/trust/ (client-only — listener primitives stay banned
-//     EVERYWHERE, including those two packages);
+//  1. every production net/http usage lives under internal/stele/,
+//     internal/trust/, internal/httpapi/, or cmd/trial-ledger-server/
+//     (listener primitives stay banned EVERYWHERE, including those
+//     packages — httpapi's *http.Server construction happens in
+//     cmd/trial-ledger-server/main.go via httpServer.ListenAndServe,
+//     a method call, never the banned http.ListenAndServe function);
 //  2. the stele client carries the 5-second timeout;
-//  3. env reads stay confined: os.Getenv appears in exactly two
+//  3. env reads stay confined: os.Getenv appears in exactly three
 //     production files — internal/mirrormark/mirrormark.go (the two
 //     inception boot reads: TRIAL_LEDGER_LORE_CORPUS_SHA_PATH +
-//     TRIAL_LEDGER_MIRRORMARK_KEY) and cmd/trial-ledger/main.go
-//     (exactly one call, os.Getenv(stele.EnvURL)); os.LookupEnv /
-//     os.Environ stay banned everywhere;
+//     TRIAL_LEDGER_MIRRORMARK_KEY), cmd/trial-ledger/main.go (exactly
+//     one call, os.Getenv(stele.EnvURL)), and
+//     cmd/trial-ledger-server/main.go (TRIAL_LEDGER_HTTP_ADDR +
+//     NEXUS_SERVICE_TOKEN); os.LookupEnv / os.Environ stay banned
+//     everywhere;
 //  4. the spine wire-contract constants hold (env var name,
 //     substrate, honest oracle-strength label).
 func TestR145B_SteleAnchorConfinement(t *testing.T) {
@@ -263,14 +274,17 @@ func TestR145B_SteleAnchorConfinement(t *testing.T) {
 		t.Errorf("R145.B pin violation: %s missing the 5-second http.Client timeout", steleSrc)
 	}
 
-	// (3) env-read confinement: exactly two os.Getenv files — the
-	// two pre-existing mirrormark boot reads + the one stele anchor
-	// read in cmd/trial-ledger/main.go.
+	// (3) env-read confinement: exactly three os.Getenv files — the
+	// two pre-existing mirrormark boot reads, the one stele anchor
+	// read in cmd/trial-ledger/main.go, and the Nexus HTTP producer's
+	// two boot reads (TRIAL_LEDGER_HTTP_ADDR + NEXUS_SERVICE_TOKEN) in
+	// cmd/trial-ledger-server/main.go (2026-06-02 additive wire).
 	wantMirrormark := filepath.Join(repoRoot(t), "internal", "mirrormark", "mirrormark.go")
 	wantMain := filepath.Join(repoRoot(t), "cmd", "trial-ledger", "main.go")
-	wantSet := map[string]bool{wantMirrormark: true, wantMain: true}
-	if len(getenvFiles) != 2 {
-		t.Errorf("R145.B pin violation: os.Getenv sites = %v, want exactly [%s %s]", getenvFiles, wantMain, wantMirrormark)
+	wantServerMain := filepath.Join(repoRoot(t), "cmd", "trial-ledger-server", "main.go")
+	wantSet := map[string]bool{wantMirrormark: true, wantMain: true, wantServerMain: true}
+	if len(getenvFiles) != 3 {
+		t.Errorf("R145.B pin violation: os.Getenv sites = %v, want exactly [%s %s %s]", getenvFiles, wantMain, wantMirrormark, wantServerMain)
 	}
 	for _, path := range getenvFiles {
 		if !wantSet[path] {
