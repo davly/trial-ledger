@@ -71,6 +71,17 @@ const (
 	// CohortRoleTrialLedger names trial-ledger's cohort role in the
 	// escape-service audit-row.
 	CohortRoleTrialLedger = "trial-ledger-trust-boundary-mhra-jurisdiction"
+
+	// EnvEscapeServiceURL is the arm switch for the escape-service
+	// wire (2026-07-10 consumer wire-in,
+	// auditledger/escape_informed.go). Read ONLY in
+	// cmd/trial-ledger-server/main.go (library packages stay env-free
+	// per the firewall pins); unset (the default) => no Client is
+	// constructed and every code path is byte-identical to the
+	// pre-wire behaviour. Set to the service's HTTP base (e.g.
+	// "http://escape-service:8111") to arm. Declared here (a constant,
+	// not a read) so the wire contract lives with the client.
+	EnvEscapeServiceURL = "TRIAL_LEDGER_ESCAPE_SERVICE_URL"
 )
 
 // EscapeRequest is the wire shape trial-ledger POSTs to escape-service.

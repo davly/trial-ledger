@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/davly/trial-ledger/internal/stele"
+	"github.com/davly/trial-ledger/internal/trust"
 )
 
 // repoRoot returns the path to the trial-ledger repo root by walking
@@ -233,7 +234,10 @@ func inSteleDir(path string) bool {
 //     TRIAL_LEDGER_MIRRORMARK_KEY), cmd/trial-ledger/main.go (exactly
 //     one call, os.Getenv(stele.EnvURL)), and
 //     cmd/trial-ledger-server/main.go (TRIAL_LEDGER_HTTP_ADDR +
-//     NEXUS_SERVICE_TOKEN); os.LookupEnv / os.Environ stay banned
+//     NEXUS_SERVICE_TOKEN + trust.EnvEscapeServiceURL — the third read
+//     is the R145.B escape-service consumer wire-in 2026-07-10, arming
+//     the auditledger EscapeInformedLedger decider; unset =
+//     byte-identical server); os.LookupEnv / os.Environ stay banned
 //     everywhere;
 //  4. the spine wire-contract constants hold (env var name,
 //     substrate, honest oracle-strength label).
@@ -311,6 +315,26 @@ func TestR145B_SteleAnchorConfinement(t *testing.T) {
 	mainSrc := string(mainData)
 	if strings.Count(mainSrc, "os.Getenv(") != 1 || !strings.Contains(mainSrc, "os.Getenv(stele.EnvURL)") {
 		t.Errorf("R145.B pin violation: %s must contain exactly one os.Getenv call and it must be os.Getenv(stele.EnvURL)", wantMain)
+	}
+
+	// cmd/trial-ledger-server/main.go: exactly the three named boot
+	// reads (TRIAL_LEDGER_HTTP_ADDR + NEXUS_SERVICE_TOKEN + the
+	// R145.B escape-service arm switch trust.EnvEscapeServiceURL,
+	// 2026-07-10 consumer wire-in). A fourth env read cannot ride in
+	// silently.
+	serverData, err := os.ReadFile(wantServerMain)
+	if err != nil {
+		t.Fatalf("read %q: %v", wantServerMain, err)
+	}
+	serverSrc := string(serverData)
+	if strings.Count(serverSrc, "os.Getenv(") != 3 ||
+		!strings.Contains(serverSrc, `os.Getenv("TRIAL_LEDGER_HTTP_ADDR")`) ||
+		!strings.Contains(serverSrc, `os.Getenv("NEXUS_SERVICE_TOKEN")`) ||
+		!strings.Contains(serverSrc, `os.Getenv(trust.EnvEscapeServiceURL)`) {
+		t.Errorf("R145.B pin violation: %s must contain exactly the three named env reads (TRIAL_LEDGER_HTTP_ADDR + NEXUS_SERVICE_TOKEN + trust.EnvEscapeServiceURL)", wantServerMain)
+	}
+	if trust.EnvEscapeServiceURL != "TRIAL_LEDGER_ESCAPE_SERVICE_URL" {
+		t.Errorf("R145.B pin violation: trust.EnvEscapeServiceURL = %q, want TRIAL_LEDGER_ESCAPE_SERVICE_URL", trust.EnvEscapeServiceURL)
 	}
 
 	// (4) spine wire-contract constants.

@@ -37,6 +37,15 @@
 //	                                      WARN if absent — emitted marks
 //	                                      won't cold-verify).
 //	TRIAL_LEDGER_MIRRORMARK_KEY          Mirror-Mark HMAC key (iik_...).
+//	TRIAL_LEDGER_ESCAPE_SERVICE_URL      cohort-canonical escape-service
+//	                                      base URL (2026-07-10 wire-in).
+//	                                      Optional — unset/empty keeps the
+//	                                      append path byte-identical to the
+//	                                      pre-wire server. When set,
+//	                                      trust-boundary appends consult
+//	                                      /v1/escape and carry its verdict
+//	                                      + mark in the cold-verifiable row
+//	                                      (never blocking; fail-closed).
 package main
 
 import (
@@ -53,6 +62,7 @@ import (
 	"github.com/davly/trial-ledger/internal/honest"
 	"github.com/davly/trial-ledger/internal/httpapi"
 	"github.com/davly/trial-ledger/internal/mirrormark"
+	"github.com/davly/trial-ledger/internal/trust"
 )
 
 const defaultAddr = ":8080"
@@ -85,7 +95,21 @@ func main() {
 	marker := mirrormark.NewMirrorMarkerFromEnv()
 	ledger := auditledger.NewLedger(marker)
 
-	srv := httpapi.NewServer(ledger, serviceToken)
+	// 2026-07-10 escape-service wire-in (IMP-T2-12 Phase 3 consumer):
+	// when TRIAL_LEDGER_ESCAPE_SERVICE_URL is set, trust-boundary
+	// appends (esig.sign / esig.withdraw / ecr.delete / ecr.lock)
+	// consult the cohort-canonical escape-service and land its verdict
+	// + Mirror-Mark INSIDE the cold-verifiable row (never blocking the
+	// append; fail-closed on wire errors). Unset (default) => decider
+	// stays nil and the decorator's Append is byte-identical to the
+	// bare ledger. See internal/auditledger/escape_informed.go.
+	var escapeDecider auditledger.EscapeDecider
+	if escURL := os.Getenv(trust.EnvEscapeServiceURL); escURL != "" {
+		escapeDecider = trust.NewClient(escURL, 0) // 0 => client's 5s default
+		log.Printf("trial-ledger-server: escape-service wire ARMED (%s=%s) — trust-boundary appends carry the /v1/escape verdict in-row", trust.EnvEscapeServiceURL, escURL)
+	}
+
+	srv := httpapi.NewServer(auditledger.NewEscapeInformedLedger(ledger, escapeDecider), serviceToken)
 
 	httpServer := &http.Server{
 		Addr:              addr,

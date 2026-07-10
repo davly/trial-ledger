@@ -144,6 +144,30 @@ type Record struct {
 	// originated it, not just what action occurred.
 	OriginatorID string `json:"originatorId,omitempty"`
 
+	// EscapeVerdict / EscapeMark — 2026-07-10 escape-service wire-in
+	// additive fields (see escape_informed.go). Populated ONLY when the
+	// row was appended through an armed EscapeInformedLedger for a
+	// trust-boundary action AND the cohort-canonical escape-service
+	// call succeeded: EscapeVerdict is the /v1/escape verdict
+	// (stay / borderline / escape) and EscapeMark is escape-service's
+	// own L43 Mirror-Mark over the MHRA AuditEnvelope it stamped
+	// (cold-verifiable via lore-mark-verify — IMP-T2-12 Phase 3).
+	//
+	// ADDITIVE + WIRE-SAFE (R145-strict), same recipe as OriginatorID:
+	// declared with `omitempty` ABOVE MirrorMark, so (a) every row
+	// appended dark marshals to byte-identical canonical bytes as
+	// before, and (b) when populated the fields are COVERED by this
+	// row's own Mirror-Mark — an inspector re-deriving the row sees
+	// which trust-boundary events the cohort trust plane flagged, and
+	// cannot be shown a stripped copy without the mark failing.
+	//
+	// SPOOF-PROOF: these fields are deliberately NOT on AppendInput —
+	// neither the Nexus wire (DisallowUnknownFields rejects them) nor
+	// a CLI stdin row can claim an escape-service verdict that was
+	// never returned; only the in-process decorator can set them.
+	EscapeVerdict string `json:"escapeVerdict,omitempty"`
+	EscapeMark    string `json:"escapeMark,omitempty"`
+
 	// MirrorMark is the L43 v1 cold-verifiable receipt over the
 	// canonical bytes of this row with MirrorMark itself cleared.
 	// Format: "lore@v1:" + base64url(8B corpus prefix || 32B HMAC).
@@ -246,6 +270,15 @@ type AppendInput struct {
 // Returns the appended Record (with ID + At + MirrorMark populated)
 // and a non-nil error on validation failure.
 func (l *Ledger) Append(in AppendInput) (Record, error) {
+	return l.appendWithEscape(in, "", "")
+}
+
+// appendWithEscape is the internal append primitive: Append with the
+// optional escape-service verdict + mark (2026-07-10 wire-in). Kept
+// unexported so ONLY the in-package EscapeInformedLedger decorator can
+// stamp these fields — see Record.EscapeVerdict's SPOOF-PROOF note.
+// With empty verdict+mark it is byte-identical to the pre-wire Append.
+func (l *Ledger) appendWithEscape(in AppendInput, escVerdict, escMark string) (Record, error) {
 	if err := validateAppendInput(in); err != nil {
 		return Record{}, err
 	}
@@ -254,16 +287,18 @@ func (l *Ledger) Append(in AppendInput) (Record, error) {
 	defer l.mu.Unlock()
 
 	r := Record{
-		ID:           atomic.AddUint64(&l.nextID, 1),
-		At:           time.Now().UTC(),
-		Action:       in.Action,
-		Actor:        in.Actor,
-		TrialID:      in.TrialID,
-		SubjectID:    in.SubjectID,
-		RecordRef:    in.RecordRef,
-		RecordHash:   in.RecordHash,
-		Detail:       in.Detail,
-		OriginatorID: in.OriginatorID,
+		ID:            atomic.AddUint64(&l.nextID, 1),
+		At:            time.Now().UTC(),
+		Action:        in.Action,
+		Actor:         in.Actor,
+		TrialID:       in.TrialID,
+		SubjectID:     in.SubjectID,
+		RecordRef:     in.RecordRef,
+		RecordHash:    in.RecordHash,
+		Detail:        in.Detail,
+		OriginatorID:  in.OriginatorID,
+		EscapeVerdict: escVerdict,
+		EscapeMark:    escMark,
 	}
 
 	// R175 wire-load-bearing stamp.
